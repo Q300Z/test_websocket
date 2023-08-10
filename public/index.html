@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Client WebSocket</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <h1>Flux d'articles : {{ articles.length }}</h1>
+
+      <button @click="toggleSubscription">
+        {{ sub ? "Se désabonner" : "S'abonner" }}
+      </button>
+      <button
+        @click="clearArticles"
+        :disabled="articles.length === 0"
+      >
+        Supprimer les articles
+      </button>
+      <button
+        @click="clearArticlesServer"
+        :disabled="articles.length === 0 && !sub"
+      >
+        Supprimer les articles sur le serveur
+      </button>
+      <button
+        @click="getArticlesServer"
+        :disabled="!sub"
+      >
+        Récupérer les articles depuis le serveur
+      </button>
+      <br />
+      <label for="generationInterval"
+        >Intervalle de génération (en millisecondes):
+      </label>
+      <input
+        type="range"
+        id="generationInterval"
+        v-model="generationInterval"
+        min="500"
+        max="1000"
+        step="100"
+      />
+      <div>Intervalle actuel : {{ generationInterval }} millisecondes</div>
+      <div style="display: block; height: 50vh; overflow: auto">
+        <ul>
+          <li
+            v-for="(article, index) in articles"
+            :key="index"
+          >
+            <strong>{{ article.title }}:</strong> {{ article.content }}<br />
+            Commentaires: {{ article.comments.join(', ') }}<br />
+            Likes: {{ article.likes }}
+            <button
+              @click="likeArticle(article)"
+              :disabled="article.liked"
+            >
+              Like
+            </button>
+            <button @click="commentArticle(article)">Commenter</button>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <script>
+      const app = Vue.createApp({
+        data() {
+          return {
+            articles: [],
+            sub: false,
+            socket: null,
+            generationInterval: 1000,
+          };
+        },
+        methods: {
+          toggleSubscription() {
+            if (!this.sub) {
+              this.subscribe();
+            } else {
+              this.unsubscribe();
+            }
+          },
+          subscribe() {
+            this.socket = new WebSocket("ws://localhost:3000/");
+            this.socket.addEventListener("open", () => {
+              console.log("Connexion WebSocket établie");
+              this.listenWebSocket();
+              this.sub = true;
+            });
+          },
+          unsubscribe() {
+            if (this.socket) {
+              this.socket.close();
+            }
+            this.sub = false;
+          },
+          clearArticles() {
+            this.articles = [];
+          },
+          clearArticlesServer() {
+            this.articles = [];
+            this.socket.send(JSON.stringify({ type: "clearHistory" }));
+          },
+          getArticlesServer() {
+            this.socket.send(JSON.stringify({ type: "getHistory" }));
+          },
+          likeArticle(article) {
+            article.likes++;
+            article.liked = true;
+            this.socket.send(
+              JSON.stringify({ type: "like", articleId: article.id })
+            );
+          },
+          commentArticle(article) {
+            const comment = prompt("Entrez un commentaire:");
+            if (comment) {
+              article.comments.push(comment);
+              this.socket.send(
+                JSON.stringify({
+                  type: "comment",
+                  articleId: article.id,
+                  comment,
+                })
+              );
+            }
+          },
+          listenWebSocket() {
+            this.socket.addEventListener("message", (event) => {
+              const data = JSON.parse(event.data);
+              switch (data.type) {
+                case "sendHistory":
+                  this.articles = data.data;
+                  this.saveArticlesToLocal(data.data);
+                  break;
+                case "updateLikes":
+                  const likedArticle = this.articles.find(
+                    (a) => a.id === data.articleId
+                  );
+                  if (likedArticle) {
+                    likedArticle.likes = data.likes;
+                    this.updateArticleInLocal(likedArticle);
+                  }
+                  break;
+                case "updateComments":
+                  const commentedArticle = this.articles.find(
+                    (a) => a.id === data.articleId
+                  );
+                  if (commentedArticle) {
+                    commentedArticle.comments = data.comments;
+                  }
+                  break;
+                case "historyCleared":
+                  this.articles = [];
+                  break;
+                case "updateArticles":
+                  this.articles.unshift(data.data);
+                  break;
+                default:
+                  console.error("Type non supporté : ", data.type);
+                  break;
+              }
+            });
+          },
+          // Fonction pour sauvegarder les articles dans le stockage local
+          saveArticlesToLocal(articles) {
+            localStorage.setItem("articles", JSON.stringify(articles));
+          },
+
+          // Fonction pour mettre à jour un article dans le stockage local
+          updateArticleInLocal(updatedArticle) {
+            const storedArticles =
+              JSON.parse(localStorage.getItem("articles")) || [];
+            const index = storedArticles.findIndex(
+              (a) => a.id === updatedArticle.id
+            );
+            if (index !== -1) {
+              storedArticles[index] = updatedArticle;
+              this.saveArticlesToLocal(storedArticles);
+            }
+          },
+
+          // Fonction pour charger les articles depuis le stockage local (au démarrage de l'application)
+          loadArticlesFromLocal() {
+            const storedArticles =
+              JSON.parse(localStorage.getItem("articles")) || [];
+            this.articles = storedArticles;
+          },
+        },
+        watch: {
+          generationInterval(newInterval) {
+            if (this.sub) {
+              this.socket.send(
+                JSON.stringify({
+                  type: "setGenerationInterval",
+                  interval: newInterval,
+                })
+              );
+            }
+          },
+        },
+        created() {
+          // Au démarrage de l'application, charger les articles depuis le stockage local si disponibles
+          this.loadArticlesFromLocal();
+        },
+      });
+
+      app.mount("#app");
+    </script>
+  </body>
+</html>

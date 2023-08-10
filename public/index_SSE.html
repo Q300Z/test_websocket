@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Client SSE</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <h1>Flux d'articles</h1>
+      <button
+        @click="subscribe"
+        :disabled="sub"
+      >
+        S'abonner
+      </button>
+      <button
+        @click="unsubscribe"
+        :disabled="!sub"
+      >
+        Se désabonner
+      </button>
+      <button
+        @click="clearArticles"
+        :disabled="articles.length <= 0"
+      >
+        Supprimer les articles
+      </button>
+      <ul>
+        <li
+          v-for="article in articles"
+          :key="article.id"
+        >
+          <strong>{{ article.title }}:</strong> {{ article.content }}<br />
+          Commentaires: {{ article.comments.join(', ') }}<br />
+          Likes: {{ article.likes }}
+          <button
+            @click="likeArticle(article)"
+            :disabled="article.liked"
+          >
+            Like
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <script>
+      const app = new Vue({
+        el: "#app",
+        data: {
+          articles: [],
+          source: null,
+          sub: false,
+        },
+        methods: {
+          subscribe() {
+            this.source = new EventSource("/sse");
+            this.source.addEventListener("message", (event) => {
+              const article = JSON.parse(event.data);
+              this.articles.push(article);
+            });
+            this.sub = true;
+          },
+          unsubscribe() {
+            if (this.source) {
+              this.source.close();
+            }
+            this.sub = false;
+          },
+          clearArticles() {
+            this.articles = [];
+          },
+          likeArticle(article) {
+            fetch(`/like-article/${article.id}`, { method: "POST" })
+              .then(() => {
+                article.likes++;
+                article.liked = true;
+              })
+              .catch((error) => {
+                console.error(
+                  "Erreur lors de la mise en like de l'article:",
+                  error
+                );
+              });
+          },
+        },
+      });
+    </script>
+  </body>
+</html>
